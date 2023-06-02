@@ -1,4 +1,4 @@
-;assignment4.asm - Procedures 5/24/23 by Grant O'Connor, Alex Rozanov & Preston Sellers
+;minesweeper.asm		Title:		Names:
 
 INCLUDE Irvine32.inc
 
@@ -30,10 +30,21 @@ ExitProcess proto,dwExitCode:dword
 
 .code				;CS register
 main proc
+	;initialize random number generator
+	call Randomize
+
+	;intro to the project
+
+	;use fpu
+
 	;procedure to choose difficulty
 	call choose_difficulty
 
 	;procedure to initialize mines
+	push mine_count
+	push board_size
+	push OFFSET board
+	call initialize_mines
 
 	;procedure for the first turn procedure (can't lose on the first turn)
 
@@ -144,4 +155,46 @@ choose_difficulty proc
 		;gets a new user input
 		jmp input
 choose_difficulty endp
+
+
+
+initialize_mines proc
+	;sets array and counter from values on stack
+	push EBP
+	mov EBP, ESP
+	mov ECX, [EBP + 16]
+	mov ESI, [EBP + 8]
+
+	random_coords:
+		;gets first random number
+		mov EAX, [EBP + 12]
+		call RandomRange
+		inc EAX
+		mov EBX, EAX
+
+		;gets a second random number
+		mov EAX, [EBP + 12]
+		call RandomRange
+		inc EAX
+
+	check_coords:
+		;checks if the location with the randomly generated coordinates has a mine.  If it does, a new set of 
+		;coordinates is generated.  If there was no mine, the tile is set to be a mine and the loop is decremented
+		imul EBX, 4
+		imul EAX, 108
+		add EAX, EBX
+		mov EDX, [ESI + EAX]
+		cmp EDX, 10
+		je set_mine
+		jmp random_coords
+
+	set_mine:
+		;sets the tile to a mine and loops to random_coords
+		mov EDX, 9
+		mov [ESI + EAX], EDX
+		loop random_coords
+
+	pop EBP
+	ret 12
+initialize_mines endp
 end main
