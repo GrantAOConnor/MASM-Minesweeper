@@ -35,14 +35,16 @@ ExitProcess proto,dwExitCode:dword
 	horizontal_line	BYTE	"___",0
 	space			BYTE	" ",0
 
-	;prompts for getting a coordinate
+	;prompts for getting a coordinate or action
 	prompt7			BYTE	"Choose a row: ",0
 	prompt8			BYTE	"Choose a column: ",0
+	prompt12		BYTE	"Choose an action:", 13, 10, "	1. Clear the tile", 13, 10, "	2. Flag/Unflag the tile", 13, 10, 0
 
 	;win/loss and misc error messages
 	prompt9			BYTE	"You tried to clear a mine.  You LOSE!",0
 	prompt10		BYTE	"You found all the mines.  You WIN!",0
 	prompt11		BYTE	"Locations flagged for mines cannot be cleared.  Unflag this tile and try again if you really want to clear it.",0
+	prompt13		BYTE	"You cannot flag this location because you already cleared it.",0
 
 	;row and column variables
 	row				DWORD	?
@@ -72,6 +74,9 @@ main proc
 	call first_turn
 
 	;procedure for every other turn
+	push board_size
+	push OFFSET board
+	call play
 
 	invoke ExitProcess,0
 main endp
@@ -366,6 +371,8 @@ get_user_input proc
 	invalid_input:
 		mov EDX, [EBP + 12]
 		call WriteString
+		mov EAX, [EBP + 16]
+		call WriteDec
 		call Crlf
 
 	get_input:
@@ -418,6 +425,7 @@ first_turn proc
 		call print_board
 
 		;gets a user input for row
+		dec ECX
 		push ECX
 		push OFFSET prompt6
 		push OFFSET prompt7
@@ -448,11 +456,6 @@ first_turn proc
 	push EBX
 	push ESI
 	call clear_tile
-
-	;prints the starting board
-	push board_size
-	push OFFSET board
-	call print_board
 
 	pop EBP
 	ret 8
@@ -605,10 +608,6 @@ clear_tile proc
 
 	;if the player tries to clear a mine, writes a loss message and ends program
 	clear_mine:
-		mov ECX, 0
-		cmp [EBP + 20], ECX
-		jnz ending
-
 		mov EDX, OFFSET prompt9
 		call WriteString
 		invoke ExitProcess,0
@@ -674,4 +673,172 @@ clear_tile proc
 		pop EBP
 		ret 16
 clear_tile endp
+
+
+
+;procedure to play the game: prints the board, asks for user input for row, column, and whether
+;they want to clear the tile or flag it for a mine, then clears or flags the chosen tile, checks
+;for if the player won, and loops the game until they do. [EBP + 8] = board/array, [EBP + 12] = max size
+play proc
+	push EBP
+	mov EBP, ESP
+	mov ESI, [EBP + 8]
+
+	;starts the turn
+	begin_turn:
+
+		;prints the current board
+		push board_size
+		push OFFSET board
+		call print_board
+
+		;gets a user input for row
+		mov ECX, [EBP + 12]
+		push ECX
+		push OFFSET prompt6
+		push OFFSET prompt7
+		call get_user_input
+		mov EBX, EAX
+		mov row, EAX
+
+		;gets a user input for col
+		push ECX
+		push OFFSET prompt6
+		push OFFSET prompt8
+		call get_user_input
+		mov col, EAX
+
+		;gets a user input for the action (clear or flag tile)
+		push 3
+		push OFFSET prompt6
+		push OFFSET prompt12
+		call get_user_input
+		mov ECX, EAX
+
+		mov EAX, col
+		mov EBX, row
+
+		;branches if the user wants to clear the tile
+		cmp ECX, 1
+		je clear
+
+		;calculates location to be flagged
+		imul EAX, 27
+		add EAX, EBX
+		shl EAX, 2
+
+		;flags the tile
+		push EAX
+		push ESI
+		call toggle_flag
+
+		;checks if the player has won
+		push ESI
+		call win
+
+		;loops the procedure until the player wins or loses
+		jmp begin_turn
+
+	clear:
+		push 0
+		push EAX
+		push EBX
+		push ESI
+		call clear_tile
+
+		;checks if the player has won
+		push ESI
+		call win
+
+		;loops the procedure until the player wins or loses
+		jmp begin_turn
+
+	pop EBP
+	ret 8
+play endp
+
+
+
+;swaps an unflagged mine to a flagged mine, and vice versa, swaps an uncheked empty tile to an incorrectly
+;flagged tile and vice versa, else prints an error message. [EBP + 8] = board, [EBP + 12] = location
+toggle_flag proc
+	push EBP
+	mov EBP, ESP
+
+	;sets tile
+	mov EBX, [EBP + 12]
+	mov ESI, [EBP + 8]
+	mov EAX, [ESI + EBX]
+
+	;checks if tile is already flagged, unflags it if it is
+	cmp EAX, 11
+	jge decrement
+
+	;checks if tile hasn't been cleared, flags it if it hasn't
+	cmp EAX, 9
+	jge increment
+
+	;prints an error message if the tile has already been cleared
+	mov EDX, OFFSET prompt13
+	call Crlf
+	call WriteString
+	call Crlf
+	jmp ending
+
+	decrement:
+		sub EAX, 2
+		jmp ending
+
+	increment:
+		add EAX, 2
+
+	ending:
+		mov [ESI + EBX], EAX
+		pop EBP
+		ret 8
+toggle_flag endp
+
+
+
+;checks if the player has won
+win proc
+	push EBP
+	mov EBP, ESP
+
+	mov ESI, [EBP + 8]
+	mov EBX, 1
+	mov ECX, 1
+
+	check_tile:
+		mov EAX, ECX
+		imul EAX, 27
+		add EAX, EBX
+		shl EAX, 2
+		mov EAX, [ESI + EAX]
+		cmp EAX, 9
+		je ending
+		cmp EAX, 10
+		je ending
+		cmp EAX, 12
+		je ending
+
+		inc EBX
+		cmp EBX, board_size
+		jle check_tile
+
+		mov EBX, 1
+		inc ECX
+		cmp ECX, board_size
+		jle check_tile
+
+	victory:
+		mov EDX, OFFSET prompt10
+		call Crlf
+		call WriteString
+		invoke ExitProcess,0
+
+	ending:
+		pop EBP
+		ret 4
+win endp
 end main
