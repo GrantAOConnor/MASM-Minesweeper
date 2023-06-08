@@ -810,6 +810,10 @@ win proc
 	mov ECX, 1
 
 	check_tile:
+		;pre-check loop
+		cmp ECX, board_size
+		jg victory
+
 		mov EAX, ECX
 		imul EAX, 27
 		add EAX, EBX
