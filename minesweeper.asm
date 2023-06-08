@@ -20,7 +20,7 @@ ExitProcess proto,dwExitCode:dword
 	prompt3			BYTE	"	2. Medium",0
 	prompt4			BYTE	"	3. Difficult",0
 	prompt5			BYTE	"	4. Rules",0
-	prompt6			BYTE	"Invalid input (1-4)",0
+	prompt6			BYTE	"Invalid input, 1-",0
 	difficulty		DWORD	?
 	board_size		DWORD	?
 	mine_count		DWORD	?
@@ -34,6 +34,19 @@ ExitProcess proto,dwExitCode:dword
 	vertical_line	BYTE	"|",0
 	horizontal_line	BYTE	"___",0
 	space			BYTE	" ",0
+
+	;prompts for getting a coordinate
+	prompt7			BYTE	"Choose a row: ",0
+	prompt8			BYTE	"Choose a column: ",0
+
+	;win/loss and misc error messages
+	prompt9			BYTE	"You tried to clear a mine.  You LOSE!",0
+	prompt10		BYTE	"You found all the mines.  You WIN!",0
+	prompt11		BYTE	"Locations flagged for mines cannot be cleared.  Unflag this tile and try again if you really want to clear it.",0
+
+	;row and column variables
+	row				DWORD	?
+	col				DWORD	?
 
 .code				;CS register
 main proc
@@ -56,7 +69,7 @@ main proc
 	;procedure for the first turn procedure (can't lose on the first turn)
 	push board_size
 	push OFFSET board
-	call print_board
+	call first_turn
 
 	;procedure for every other turn
 
@@ -75,6 +88,8 @@ choose_difficulty proc
 	invalid_input:
 		mov EDX, OFFSET prompt6
 		call WriteString
+		mov EAX, 4
+		call WriteDec
 		call Crlf
 
 	;gets a user input
@@ -284,7 +299,10 @@ print_board proc
 			jge print_exclaimation
 
 			;else prints the number on the tile
+			mov EDX, OFFSET space
+			call WriteString
 			call WriteDec
+			call WriteString
 
 		L3:
 			;increments counter and checks break condition
@@ -335,4 +353,325 @@ print_board proc
 		call WriteString
 		jmp label_columns2
 print_board endp
+
+
+
+;gets an input for a column or row.  [EBP + 8] = initial prompt, [EBP + 12] = invalid input prompt, [EBP + 16] = max size
+get_user_input proc
+	;sets parameters and counters
+	push EBP
+	mov EBP, ESP
+	jmp get_input
+
+	invalid_input:
+		mov EDX, [EBP + 12]
+		call WriteString
+		call Crlf
+
+	get_input:
+		mov EDX, [EBP + 8]
+		call WriteString
+		call ReadInt
+
+		cmp EAX, 1
+		jl invalid_input
+
+		cmp EAX, [EBP + 16]
+		jg invalid_input
+
+	pop EBP
+	ret 12
+get_user_input endp
+
+
+
+first_turn proc
+	push EBP
+	mov EBP, ESP
+	mov ESI, [EBP + 8]
+	mov ECX, [EBP + 12]
+	jmp start_first_turn
+
+	reset_mines:
+		;set all tiles back to 10
+		mov EDI, EAX
+		mov EDX, EBX
+		push ESI
+		call reset_board
+
+		;generate new random mines
+		push mine_count
+		mov ECX, [EBP + 12]
+		push ECX
+		push ESI
+		call initialize_mines
+
+		;re-check for adjacent mines (repeated until first move is safe)
+		mov EAX, EDI
+		mov EBX, EDX
+		jmp ensure_no_mines
+
+	start_first_turn:
+		;prints the starting board
+		push board_size
+		push OFFSET board
+		call print_board
+
+		;gets a user input for row
+		push ECX
+		push OFFSET prompt6
+		push OFFSET prompt7
+		call get_user_input
+		mov EBX, EAX
+		mov row, EAX
+
+		;gets a user input for col
+		push ECX
+		push OFFSET prompt6
+		push OFFSET prompt8
+		call get_user_input
+		mov col, EAX
+
+	ensure_no_mines:
+		mov EAX, row
+		mov EBX, col
+		push EAX
+		push EBX
+		push ESI
+		call count_adjacent_mines
+		cmp ECX, 0
+		jne reset_mines
+
+	;calls clear_tile on chosen space once there are no adjacent mines
+	push 0
+	push EAX
+	push EBX
+	push ESI
+	call clear_tile
+
+	;prints the starting board
+	push board_size
+	push OFFSET board
+	call print_board
+
+	pop EBP
+	ret 8
+first_turn endp
+
+
+
+;counts all adjacent mines.  [EBP + 8] = board/array, [EBP + 12] = col of tile, [EBP + 16] = row of tile
+count_adjacent_mines proc
+	push EBP
+	mov EBP, ESP
+	mov ECX, 0				;inner loop counter
+	mov EDX, 0				;outer loop counter
+	mov EDI, 0				;counter for adjacent mines
+	mov ESI, [EBP + 8]
+	jmp check_tile
+
+	add_mine:
+		inc EDI
+		jmp increment_counters
+
+	check_tile:
+		;sets EAX to the correct position of each tile to be checked
+		mov EAX, [EBP + 12]
+		mov EBX, [EBP + 16]
+		sub EAX, 1
+		sub EBX, 1
+		add EAX, ECX
+		add EBX, EDX
+		imul EAX, 27
+		add EAX, EBX
+		shl EAX, 2
+
+		;increments the counter if it is a mine
+		mov EAX, [ESI + EAX]
+		cmp EAX, 9
+		je add_mine
+		cmp EAX, 11
+		je add_mine
+
+	increment_counters:
+		inc ECX
+		cmp ECX, 3
+		jl check_tile
+
+		mov ECX, 0
+		inc EDX
+		cmp EDX, 3
+		jl check_tile
+
+	mov EAX, [EBP + 12]
+	mov EBX, [EBP + 16]
+	mov ECX, EDI
+
+	pop EBP
+	ret 12
+count_adjacent_mines endp
+
+
+
+;sets each space in the board back to 10
+reset_board proc
+	push EBP
+	mov EBP, ESP
+	mov ESI, [EBP + 8]
+	mov EAX, 0
+	mov EBX, 10
+
+	mov ECX, 729
+
+	reset_tile:
+		mov [ESI + EAX], EBX
+		add EAX, 4
+		loop reset_tile
+
+	pop EBP
+	ret 4
+reset_board endp
+
+
+
+;clears a tile on the board, if it is a mine, the player loses, if it has adjacent mines, changes tile to the given number
+;if the tile has a flag on it, it will print an error message, if the tile has already been cleared, it will clear all adjacent
+;tiles that don't have a flag on it, and if there are no adjacent mines, it will clear all adjacent tiles.  [EBP + 8] = board,
+;[EBP + 12] = row, [EBP + 16] = col, [EBP + 20] = whether the function was called recursively
+clear_tile proc
+	push EBP
+	mov EBP, ESP
+
+	;enforces upper and lower bounds
+	mov EAX, [EBP + 12]
+	mov EBX, [EBP + 16]
+	cmp EAX, 1
+	jl ending
+	cmp EAX, board_size
+	jg ending
+	cmp EBX, 1
+	jl ending
+	cmp EBX, board_size
+	jg ending
+
+	;finds location to be cleared
+	mov ESI, [EBP + 8]
+	mov EAX, [EBP + 12]
+	mov EBX, [EBP + 16]
+	imul EBX, 27
+	add EAX, EBX
+	shl EAX, 2
+
+	;checks if tile is 9/an unflagged mine
+	mov ECX, 9
+	cmp [ESI + EAX], ECX
+	je clear_mine
+
+	;checks if tile is 11 or 12, a flagged mine or a flagged non-mine tile
+	mov ECX, 11
+	cmp [ESI + EAX], ECX
+	je clear_flag
+	mov ECX, 12
+	cmp [ESI + EAX], ECX
+	je clear_flag
+
+	;checks if tile has already been cleared
+	mov ECX, 8
+	cmp [ESI + EAX], ECX
+	jle check_clear_adjacent
+	;jle ending
+
+	;counts the number of adjacent mines
+	mov EAX, [EBP + 12]
+	push EAX
+	mov EBX, [EBP + 16]
+	push EBX
+	push ESI
+	call count_adjacent_mines
+
+	;sets the tile to the number of adjacent mines
+	mov EAX, [EBP + 12]
+	mov EBX, [EBP + 16]
+	imul EBX, 27
+	add EAX, EBX
+	shl EAX, 2
+	mov ESI, [EBP + 8]
+	mov [ESI + EAX], ECX
+
+	;clears adjacent tiles when there are no adjacent mines
+	cmp ECX, 0
+	jz clear_adjacent
+	jmp ending
+
+	;if the player tries to clear a mine, writes a loss message and ends program
+	clear_mine:
+		mov ECX, 0
+		cmp [EBP + 20], ECX
+		jnz ending
+
+		mov EDX, OFFSET prompt9
+		call WriteString
+		invoke ExitProcess,0
+
+	;if the player tries to clear a flagged tile, check if the function call was recursive
+	clear_flag:
+		mov ECX, 0
+		cmp [EBP + 20], ECX
+		jnz ending
+
+		;if function call was not recursive, print error message
+		mov EDX, OFFSET prompt11
+		call WriteString
+		jmp ending
+
+	;checks if the function was called recursively, if it wasn't, calls this function for each adjacent tile
+	check_clear_adjacent:
+		mov ECX, 0
+		cmp [EBP + 20], ECX
+		jnz ending
+
+	;calls clear_tile for each adjacent tile
+	clear_adjacent:
+		mov ECX, 0
+		mov EDX, 0
+
+	call_clear_adjacent:
+		;decides what tile to call clear_tile for
+		mov EAX, [EBP + 12]
+		mov EBX, [EBP + 16]
+		sub EAX, 1
+		sub EBX, 1
+		add EAX, ECX
+		add EBX, EDX
+
+		;saves counter registers
+		push ECX
+		push EDX
+
+		;calls clear_tile for the applicable adjacent tile
+		push 1
+		push EBX
+		push EAX
+		push ESI
+		call clear_tile
+
+		;gets saved values from stack back to registers
+		pop EDX
+		pop ECX
+
+		;increments counter for inner loop
+		inc ECX
+		cmp ECX, 3
+		jl call_clear_adjacent
+
+		;increments counter for outer loop
+		inc EDX
+		mov ECX, 0
+		cmp EDX, 3
+		jl call_clear_adjacent
+
+	ending:
+		pop EBP
+		ret 16
+clear_tile endp
 end main
